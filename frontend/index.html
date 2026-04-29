@@ -2,6 +2,7 @@
 <html>
 <head>
   <title>FileConversion Dashboard</title>
+
   <style>
     body {
       font-family: Arial;
@@ -10,98 +11,74 @@
       padding: 20px;
     }
 
-    .box {
-      border: 2px dashed #64748b;
-      padding: 30px;
-      text-align: center;
-      margin-bottom: 20px;
-      cursor: pointer;
+    input, button {
+      margin-top: 10px;
+      padding: 8px;
+      display: block;
     }
 
-    .file {
-      background: #1e293b;
-      padding: 10px;
-      margin: 10px 0;
-      border-radius: 8px;
-    }
-
-    button {
-      padding: 6px 10px;
-      margin-top: 5px;
-      cursor: pointer;
+    #status {
+      margin-top: 15px;
+      color: #38bdf8;
     }
   </style>
 </head>
 
 <body>
 
-<h1>📁 FileConversion Dashboard</h1>
+  <h2>Upload File</h2>
 
-<div class="box" id="dropzone">
-  Drag & Drop File Here or Click
-</div>
+  <input type="file" id="fileInput" />
+  <button onclick="uploadFile()">Upload</button>
 
-<h2>Uploaded Files</h2>
-<div id="files"></div>
+  <div id="status"></div>
 
-<script>
-const API = "https://fileconversion-api.ethanfilbeck.workers.dev";
+  <script>
+    async function uploadFile() {
+      const fileInput = document.getElementById("fileInput");
+      const status = document.getElementById("status");
+      const file = fileInput.files[0];
 
-// ================= UPLOAD =================
-const dropzone = document.getElementById("dropzone");
+      if (!file) {
+        alert("Pick a file first");
+        return;
+      }
 
-dropzone.onclick = () => {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.onchange = () => uploadFile(input.files[0]);
-  input.click();
-};
+      status.innerText = "Uploading...";
 
-dropzone.ondragover = e => e.preventDefault();
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
 
-dropzone.ondrop = e => {
-  e.preventDefault();
-  uploadFile(e.dataTransfer.files[0]);
-};
+        const res = await fetch("https://fileconversion-api.ethanfilbeck.workers.dev/upload/", {
+          method: "POST",
+          body: formData
+        });
 
-async function uploadFile(file) {
-  const form = new FormData();
-  form.append("file", file);
+        if (!res.ok) {
+          throw new Error("Upload failed");
+        }
 
-  await fetch(API + "/upload", {
-    method: "POST",
-    body: form
-  });
+        const data = await res.json();
 
-  loadFiles();
-}
+        console.log(data);
 
-// ================= LOAD FILES =================
-async function loadFiles() {
-  const res = await fetch(API + "/files");
-  const data = await res.json();
+        if (data?.file?.fileKey) {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(data.file.fileKey);
+          }
 
-  const container = document.getElementById("files");
-  container.innerHTML = "";
+          status.innerText = "Upload complete — fileKey copied!";
+        } else {
+          status.innerText = "Upload failed.";
+        }
 
-  data.files.forEach(f => {
-    const div = document.createElement("div");
-    div.className = "file";
-
-    div.innerHTML = `
-      <b>${f.name}</b><br/>
-      ${f.size} bytes<br/>
-      <a href="${API}${f.url}" target="_blank">
-        <button>Download</button>
-      </a>
-    `;
-
-    container.appendChild(div);
-  });
-}
-
-loadFiles();
-</script>
+      } catch (err) {
+        console.error(err);
+        status.innerText = "Error uploading file.";
+      }
+    }
+  </script>
 
 </body>
 </html>
