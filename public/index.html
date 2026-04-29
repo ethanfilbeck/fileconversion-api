@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>FileConversion Upload</title>
+  <style>
+    body {
+      font-family: Arial;
+      max-width: 600px;
+      margin: 50px auto;
+    }
+
+    .dropzone {
+      border: 2px dashed #aaa;
+      padding: 40px;
+      text-align: center;
+      margin-bottom: 20px;
+      cursor: pointer;
+    }
+
+    .progress {
+      width: 100%;
+      background: #eee;
+      margin-top: 10px;
+    }
+
+    .bar {
+      width: 0%;
+      height: 20px;
+      background: green;
+    }
+  </style>
+</head>
+
+<body>
+
+<h2>Upload File</h2>
+
+<div class="dropzone" id="dropzone">
+  Drop file here or click
+  <input type="file" id="fileInput" hidden />
+</div>
+
+<button onclick="upload()">Upload</button>
+
+<div class="progress">
+  <div class="bar" id="bar"></div>
+</div>
+
+<pre id="output"></pre>
+
+<script>
+const input = document.getElementById("fileInput");
+const dropzone = document.getElementById("dropzone");
+
+dropzone.onclick = () => input.click();
+
+dropzone.ondragover = e => {
+  e.preventDefault();
+};
+
+dropzone.ondrop = e => {
+  e.preventDefault();
+  input.files = e.dataTransfer.files;
+};
+
+async function upload() {
+  const file = input.files[0];
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/upload");
+
+  xhr.upload.onprogress = e => {
+    const percent = (e.loaded / e.total) * 100;
+    document.getElementById("bar").style.width = percent + "%";
+  };
+
+  xhr.onload = () => {
+    const res = JSON.parse(xhr.responseText);
+
+    const link = `${window.location.origin}/file/${res.fileKey}`;
+
+    document.getElementById("output").innerHTML =
+      "Download Link:\n" + link +
+      "\n\nClick to copy";
+
+    navigator.clipboard.writeText(link);
+  };
+
+  xhr.send(formData);
+}
+</script>
+
+</body>
+</html>

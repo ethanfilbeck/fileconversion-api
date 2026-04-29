@@ -1,3 +1,11 @@
 name = "fileconversion-api"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "fileconversion-uploads"
+
+[[kv_namespaces]]
+binding = "DB"
+id = "c65de6274cf24ceabe8dcfde8116fa2f"
