@@ -4,27 +4,46 @@ import { HttpError, finalize, jsonError, corsHeaders, safeFilename } from "./lib
 import { LIMITS } from "./lib/pdf.js";
 import { merge, split, compress } from "./tools.js";
 import { uploadFile, listFiles, downloadFile, deleteFile } from "./files.js";
-import { requireUser } from "./lib/auth.js";
+import { resolvePlan, me, plans, checkout, portal, webhook } from "./billing.js";
+import { hasAdmin, incrementUsage } from "./lib/supabase.js";
+
+// PDF tools: open to everyone; signed-in users get their plan's limits and usage is counted.
+const TOOLS = { merge, split, compress };
 
 const ROUTES = {
-  "POST /api/merge": merge,
-  "POST /api/split": split,
-  "POST /api/compress": compress,
   "GET /health": () => Response.json({ status: "ok" }),
   "POST /upload": (req, env) => upload(req, env),
   // Public, non-secret settings the browser needs to start Supabase auth.
   "GET /api/config": (req, env) =>
     Response.json({ supabaseUrl: env.SUPABASE_URL || null, supabaseKey: env.SUPABASE_PUBLISHABLE_KEY || null }),
-  "GET /api/me": async (req, env) => Response.json({ user: await requireUser(req, env) }),
+  "GET /api/me": me,
+  "GET /api/plans": plans,
   "GET /api/files": listFiles,
-  "POST /api/files": uploadFile,
+  "POST /api/files": async (req, env) => uploadFile(req, env, await resolvePlan(req, env)),
+  "POST /api/billing/checkout": checkout,
+  "POST /api/billing/portal": portal,
+  "POST /api/billing/webhook": webhook,
 };
 
 // Routes with an id in the path: /api/files/:id
 const FILE_ROUTES = { GET: downloadFile, DELETE: deleteFile };
 
+async function runTool(name, request, env, ctx) {
+  const plan = await resolvePlan(request, env, { optional: true });
+  const bytes = Number(request.headers.get("Content-Length") || 0);
+  const response = await TOOLS[name](request, env, plan);
+  if (plan.user && hasAdmin(env) && response.ok) {
+    // Fire-and-forget; the promise chain means a failure can never throw into the response.
+    const track = Promise.resolve()
+      .then(() => incrementUsage(env, plan.user.id, name, bytes))
+      .catch((err) => console.error("Usage tracking failed", err?.message));
+    ctx?.waitUntil?.(track);
+  }
+  return response;
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     // Tolerate a trailing slash ("/upload/") — the old frontend sends one.
     const path = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, "") : url.pathname;
@@ -36,8 +55,11 @@ export default {
     let response;
     try {
       const handler = ROUTES[`${request.method} ${path}`];
+      const tool = request.method === "POST" && path.startsWith("/api/") ? path.slice(5) : null;
       if (handler) {
         response = await handler(request, env);
+      } else if (tool && Object.hasOwn(TOOLS, tool)) {
+        response = await runTool(tool, request, env, ctx);
       } else if (path.startsWith("/api/files/") && FILE_ROUTES[request.method]) {
         response = await FILE_ROUTES[request.method](request, env, path.slice("/api/files/".length));
       } else if (request.method === "GET" && path.startsWith("/file/")) {

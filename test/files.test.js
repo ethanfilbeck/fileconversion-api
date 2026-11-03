@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
 import worker from "../src/index.js";
-import { FILE_LIMITS } from "../src/files.js";
+import { PLANS } from "../src/lib/plans.js";
 
 const SUPABASE_URL = "https://proj.supabase.co";
 let privateKey, otherKey, env;
@@ -63,7 +63,9 @@ describe("auth", () => {
   });
   it("accepts a valid Supabase token", async () => {
     const res = await call("GET", "/api/me", { auth: await token("alice") });
-    expect(await res.json()).toEqual({ user: { id: "alice", email: "alice@x.test" } });
+    const body = await res.json();
+    expect(body.user).toEqual({ id: "alice", email: "alice@x.test" });
+    expect(body.plan).toBe("free");
   });
   it("rejects tokens signed by another key", async () => {
     expect((await call("GET", "/api/me", { auth: await token("alice", { key: otherKey }) })).status).toBe(401);
@@ -119,7 +121,7 @@ describe("my files", () => {
 
   it("enforces the per-user file limit", async () => {
     const alice = await token("alice");
-    for (let i = 0; i < FILE_LIMITS.maxFilesPerUser; i++) {
+    for (let i = 0; i < PLANS.free.maxSavedFiles; i++) {
       await env.DB.put(`files:alice:${i}`, "1", { metadata: { id: String(i), createdAt: i } });
     }
     expect((await call("POST", "/api/files", { auth: alice, body: form() })).status).toBe(409);

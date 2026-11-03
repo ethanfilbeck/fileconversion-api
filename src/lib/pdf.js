@@ -1,13 +1,11 @@
 // PDF input handling: size limits, magic-byte checks, safe loading.
 import { PDFDocument } from "pdf-lib";
 import { HttpError } from "./http.js";
+import { PLANS } from "./plans.js";
 
-export const LIMITS = {
-  maxFileBytes: 10 * 1024 * 1024, // per file
-  maxTotalBytes: 25 * 1024 * 1024, // per request (Workers have 128MB memory)
-  maxFiles: 20,
-  maxPages: 500,
-};
+// Default (free) limits; callers pass the signed-in user's plan limits.
+export const LIMITS = PLANS.free;
+const mb = (n) => Math.round(n / 1024 / 1024);
 
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
 
@@ -24,14 +22,15 @@ export function isPdf(bytes) {
 }
 
 // Read uploaded PDFs from a multipart form, enforcing limits before buffering.
-export async function readPdfUploads(request, { min = 1, max = LIMITS.maxFiles } = {}) {
+export async function readPdfUploads(request, { min = 1, max, limits = LIMITS } = {}) {
+  max = Math.min(max ?? limits.maxFiles, limits.maxFiles);
   const type = request.headers.get("Content-Type") || "";
   if (!type.includes("multipart/form-data")) {
     throw new HttpError(415, "Expected multipart/form-data");
   }
   const declared = Number(request.headers.get("Content-Length") || 0);
-  if (declared > LIMITS.maxTotalBytes + 1024 * 1024) {
-    throw new HttpError(413, `Request too large (max ${LIMITS.maxTotalBytes / 1024 / 1024}MB total)`);
+  if (declared > limits.maxTotalBytes + 1024 * 1024) {
+    throw new HttpError(413, `Request too large (max ${mb(limits.maxTotalBytes)}MB total)`);
   }
 
   let form;
@@ -48,10 +47,10 @@ export async function readPdfUploads(request, { min = 1, max = LIMITS.maxFiles }
   let total = 0;
   for (const f of files) {
     if (f.size === 0) throw new HttpError(400, `"${f.name}" is empty`);
-    if (f.size > LIMITS.maxFileBytes) throw new HttpError(413, `"${f.name}" is over ${LIMITS.maxFileBytes / 1024 / 1024}MB`);
+    if (f.size > limits.maxFileBytes) throw new HttpError(413, `"${f.name}" is over ${mb(limits.maxFileBytes)}MB`);
     total += f.size;
   }
-  if (total > LIMITS.maxTotalBytes) throw new HttpError(413, `Files total over ${LIMITS.maxTotalBytes / 1024 / 1024}MB`);
+  if (total > limits.maxTotalBytes) throw new HttpError(413, `Files total over ${mb(limits.maxTotalBytes)}MB`);
 
   const out = [];
   for (const f of files) {
@@ -59,10 +58,10 @@ export async function readPdfUploads(request, { min = 1, max = LIMITS.maxFiles }
     if (!isPdf(bytes)) throw new HttpError(415, `"${f.name}" is not a PDF`);
     out.push({ name: f.name, bytes });
   }
-  return { files: out, form };
+  return { files: out, form, totalBytes: total };
 }
 
-export async function loadPdf(bytes, name = "file") {
+export async function loadPdf(bytes, name = "file", limits = LIMITS) {
   let doc, pages;
   try {
     doc = await PDFDocument.load(bytes, { updateMetadata: false });
@@ -75,7 +74,7 @@ export async function loadPdf(bytes, name = "file") {
     throw new HttpError(422, `"${name}" could not be read (corrupted PDF?)`);
   }
   if (pages === 0) throw new HttpError(422, `"${name}" has no pages`);
-  if (pages > LIMITS.maxPages) throw new HttpError(413, `"${name}" has too many pages (max ${LIMITS.maxPages})`);
+  if (pages > limits.maxPages) throw new HttpError(413, `"${name}" has too many pages (max ${limits.maxPages})`);
   return doc;
 }
 

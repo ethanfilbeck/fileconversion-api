@@ -2,22 +2,23 @@
 // Every key is prefixed with the user's id, and every lookup rebuilds the key
 // from the verified token, so one user can never reach another user's files.
 import { HttpError, safeFilename, fileResponse } from "./lib/http.js";
-import { LIMITS } from "./lib/pdf.js";
 import { requireUser } from "./lib/auth.js";
+import { PLANS } from "./lib/plans.js";
 
-export const FILE_LIMITS = { maxFilesPerUser: 50 };
+const mb = (n) => Math.round(n / 1024 / 1024);
 
 const ID_RE = /^[0-9a-f-]{36}$/;
 const objectKey = (uid, id) => `u/${uid}/${id}`;
 const indexKey = (uid, id) => `files:${uid}:${id}`;
 
 // POST /api/files — field: file
-export async function uploadFile(request, env) {
-  const user = await requireUser(request, env);
+export async function uploadFile(request, env, plan = {}) {
+  const user = plan.user || (await requireUser(request, env));
+  const limits = plan.limits || PLANS.free;
 
-  const existing = await env.DB.list({ prefix: `files:${user.id}:`, limit: FILE_LIMITS.maxFilesPerUser });
-  if (existing.keys.length >= FILE_LIMITS.maxFilesPerUser) {
-    throw new HttpError(409, `You can keep up to ${FILE_LIMITS.maxFilesPerUser} files. Delete some first.`);
+  const existing = await env.DB.list({ prefix: `files:${user.id}:`, limit: limits.maxSavedFiles });
+  if (existing.keys.length >= limits.maxSavedFiles) {
+    throw new HttpError(409, `Your plan keeps up to ${limits.maxSavedFiles} files. Delete some or upgrade.`);
   }
 
   let form;
@@ -29,7 +30,7 @@ export async function uploadFile(request, env) {
   const file = form.get("file");
   if (!file || typeof file !== "object") throw new HttpError(400, "No file uploaded");
   if (file.size === 0) throw new HttpError(400, "Empty file");
-  if (file.size > LIMITS.maxFileBytes) throw new HttpError(413, "File too large (10MB max)");
+  if (file.size > limits.maxFileBytes) throw new HttpError(413, `File too large (${mb(limits.maxFileBytes)}MB max on your plan)`);
 
   const id = crypto.randomUUID();
   const meta = {

@@ -115,11 +115,11 @@
   </section>
 </main>
 
-<footer>Limits: 10MB per file, 25MB per job, 500 pages.</footer>
+<footer id="limits">Limits: 10MB per file, 25MB per job, 500 pages.</footer>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
-const MAX_FILE = 10 * 1024 * 1024;
+let MAX_FILE = 10 * 1024 * 1024; // updated from /api/me for signed-in users
 const TOOLS = {
   merge:    { label: "Merge PDFs",    multi: true,  min: 2, title: "Drop 2 or more PDFs here" },
   split:    { label: "Split PDF",     multi: false, min: 1, title: "Drop a PDF here" },
@@ -174,7 +174,7 @@ function add(fileList) {
   setStatus("");
   for (const f of fileList) {
     if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") { setStatus(`"${f.name}" isn't a PDF.`, "err"); continue; }
-    if (f.size > MAX_FILE) { setStatus(`"${f.name}" is over 10MB.`, "err"); continue; }
+    if (f.size > MAX_FILE) { setStatus(`"${f.name}" is over ${MAX_FILE / 1048576}MB.`, "err"); continue; }
     if (TOOLS[tool].multi) files.push(f); else files = [f];
   }
   render();
@@ -212,7 +212,8 @@ go.onclick = async () => {
   setStatus("Processing…");
   $("save").hidden = true;
   try {
-    const res = await fetch(`/api/${tool}`, { method: "POST", body: fd });
+    const headers = session ? { Authorization: `Bearer ${session.access_token}` } : {}; // gives signed-in users their plan limits
+    const res = await fetch(`/api/${tool}`, { method: "POST", body: fd, headers });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `Request failed (${res.status})`);
@@ -243,7 +244,7 @@ go.onclick = async () => {
 };
 
 // ---------- Accounts (Supabase) & My files ----------
-let sb = null, session = null, lastResult = null;
+let sb = null, session = null, lastResult = null, me = null;
 
 async function initAuth() {
   try {
@@ -251,9 +252,47 @@ async function initAuth() {
     if (!cfg.supabaseUrl || !cfg.supabaseKey || !window.supabase) return renderAccount();
     sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
     session = (await sb.auth.getSession()).data.session;
-    sb.auth.onAuthStateChange((_e, s) => { session = s; renderAccount(); refreshFiles(); });
+    sb.auth.onAuthStateChange((_e, s) => { session = s; renderAccount(); refreshFiles(); loadMe(); });
   } catch { /* accounts unavailable; tools still work */ }
   renderAccount();
+  await loadMe();
+  handleBillingReturn();
+}
+
+// Plan, limits and billing state for the signed-in user.
+async function loadMe() {
+  me = null;
+  if (session) {
+    try { me = await (await api("/api/me")).json(); } catch { /* fall back to free limits */ }
+  }
+  const l = me?.limits || { maxFileMB: 10, maxTotalMB: 25, maxPages: 500 };
+  MAX_FILE = l.maxFileMB * 1048576;
+  $("limits").textContent = `${me ? me.planName + " plan · " : ""}Limits: ${l.maxFileMB}MB per file, ${l.maxTotalMB}MB per job, ${l.maxPages} pages.`;
+  renderAccount();
+}
+
+function handleBillingReturn() {
+  const q = new URLSearchParams(location.search).get("billing");
+  if (!q) return;
+  history.replaceState(null, "", location.pathname);
+  if (q === "cancelled") return setStatus("Checkout cancelled. You haven't been charged.");
+  setStatus("Payment received. Activating your plan…", "ok");
+  // Stripe's webhook can take a few seconds; check a few times.
+  let tries = 0;
+  const poll = async () => {
+    await loadMe();
+    if (me && me.plan !== "free") return setStatus(`You're on ${me.planName}. Thanks!`, "ok");
+    if (++tries < 10) setTimeout(poll, 2000);
+    else setStatus("Payment received. Your plan will activate in a minute, so refresh shortly.", "ok");
+  };
+  poll();
+}
+
+async function billing(path, body) {
+  try {
+    const { url } = await (await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })).json();
+    location.href = url;
+  } catch (err) { setStatus(err.message, "err"); }
 }
 
 function renderAccount() {
@@ -262,6 +301,14 @@ function renderAccount() {
   if (!sb) return;
   if (session) {
     el.append(document.createTextNode(session.user.email + " · "));
+    if (me?.billingEnabled) {
+      const paid = me.plan !== "free";
+      const b = document.createElement("button");
+      b.className = "link";
+      b.textContent = paid ? `${me.planName} · Manage billing` : "Upgrade to Pro";
+      b.onclick = () => paid ? billing("/api/billing/portal") : billing("/api/billing/checkout", { plan: "pro" });
+      el.append(b, document.createTextNode(" · "));
+    }
     const out = document.createElement("button");
     out.className = "link"; out.textContent = "Sign out";
     out.onclick = () => sb.auth.signOut();
@@ -341,7 +388,7 @@ $("uploadBtn").onclick = () => $("uploadInput").click();
 $("uploadInput").onchange = async () => {
   const f = $("uploadInput").files[0]; $("uploadInput").value = "";
   if (!f) return;
-  if (f.size > MAX_FILE) return filesStatus("Files must be under 10MB.", "err");
+  if (f.size > MAX_FILE) return filesStatus(`Files must be under ${MAX_FILE / 1048576}MB on your plan.`, "err");
   filesStatus("Uploading…");
   try { await saveFile(f); filesStatus("Saved.", "ok"); refreshFiles(); }
   catch (err) { filesStatus(err.message, "err"); }

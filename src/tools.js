@@ -4,17 +4,19 @@ import { zipSync } from "fflate";
 import { HttpError, fileResponse } from "./lib/http.js";
 import { readPdfUploads, loadPdf, parseRanges, baseName, LIMITS } from "./lib/pdf.js";
 
+// Every handler takes (request, env, plan) where plan.limits holds the caller's limits.
+
 // POST /api/merge  — form fields: file (2+), in the order to merge
-export async function merge(request) {
-  const { files } = await readPdfUploads(request, { min: 2 });
+export async function merge(request, env, { limits = LIMITS } = {}) {
+  const { files } = await readPdfUploads(request, { min: 2, limits });
   const out = await PDFDocument.create();
   let totalPages = 0;
 
   for (const f of files) {
-    const src = await loadPdf(f.bytes, f.name);
+    const src = await loadPdf(f.bytes, f.name, limits);
     totalPages += src.getPageCount();
-    if (totalPages > LIMITS.maxPages) {
-      throw new HttpError(413, `Merged document would exceed ${LIMITS.maxPages} pages`);
+    if (totalPages > limits.maxPages) {
+      throw new HttpError(413, `Merged document would exceed ${limits.maxPages} pages`);
     }
     const pages = await out.copyPages(src, src.getPageIndices());
     pages.forEach((p) => out.addPage(p));
@@ -25,10 +27,10 @@ export async function merge(request) {
 }
 
 // POST /api/split — fields: file, mode=range|each, pages="1-3,5" (range mode)
-export async function split(request) {
-  const { files, form } = await readPdfUploads(request, { max: 1 });
+export async function split(request, env, { limits = LIMITS } = {}) {
+  const { files, form } = await readPdfUploads(request, { max: 1, limits });
   const [{ name, bytes }] = files;
-  const src = await loadPdf(bytes, name);
+  const src = await loadPdf(bytes, name, limits);
   const pageCount = src.getPageCount();
   const mode = String(form.get("mode") || "range");
   const base = baseName(name);
@@ -64,10 +66,10 @@ export async function split(request) {
 // POST /api/compress — field: file
 // pdf-lib can't resample images, so this is structural optimization:
 // object streams, dropped metadata, de-duplicated structure.
-export async function compress(request) {
-  const { files } = await readPdfUploads(request, { max: 1 });
+export async function compress(request, env, { limits = LIMITS } = {}) {
+  const { files } = await readPdfUploads(request, { max: 1, limits });
   const [{ name, bytes }] = files;
-  const src = await loadPdf(bytes, name);
+  const src = await loadPdf(bytes, name, limits);
 
   src.setTitle("");
   src.setAuthor("");
