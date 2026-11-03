@@ -109,6 +109,12 @@
           <button class="go" type="submit" data-action="in">Sign in</button>
           <button class="go secondary" type="submit" data-action="up">Create account</button>
         </div>
+        <button class="link" type="button" id="forgot">Forgot password?</button>
+      </form>
+      <form class="signin" id="resetForm" hidden>
+        <p class="muted">Choose a new password for your account.</p>
+        <input type="password" id="newPassword" placeholder="New password (8+ characters)" autocomplete="new-password" minlength="8" required />
+        <button class="go" type="submit">Save new password</button>
       </form>
     </div>
     <div id="signedIn" hidden>
@@ -261,7 +267,17 @@ async function initAuth() {
     if (!cfg.supabaseUrl || !cfg.supabaseKey || !window.supabase) return renderAccount();
     sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
     session = (await sb.auth.getSession()).data.session;
-    sb.auth.onAuthStateChange((_e, s) => { session = s; renderAccount(); refreshFiles(); loadMe(); });
+    sb.auth.onAuthStateChange((event, s) => {
+      session = s;
+      if (event === "PASSWORD_RECOVERY") {
+        // Arrived from a reset email: show the new-password form.
+        document.querySelector('[data-tool="files"]').click();
+        $("signedOut").hidden = false; $("signedIn").hidden = true;
+        $("signinForm").hidden = true; $("resetForm").hidden = false;
+        return;
+      }
+      renderAccount(); refreshFiles(); loadMe();
+    });
   } catch { /* accounts unavailable; tools still work */ }
   renderAccount();
   await loadMe();
@@ -388,8 +404,27 @@ $("signinForm").onsubmit = async (e) => {
     ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin } })
     : await sb.auth.signInWithPassword({ email, password });
   if (error) return filesStatus(error.message, "err");
-  if (submitAction === "up" && !data.session) return filesStatus("Check your email to confirm your account, then sign in.", "ok");
+  // Supabase reports success without sending anything when the email is already registered,
+  // so say so instead of leaving people waiting for an email that never comes.
+  if (submitAction === "up" && !data.session) return filesStatus("Check your email to confirm your account. No email after a minute? You may already have an account: sign in, or use Forgot password.", "ok");
   filesStatus("");
+};
+
+$("forgot").onclick = async () => {
+  const email = $("email").value.trim();
+  if (!sb) return filesStatus("Accounts aren't set up yet.", "err");
+  if (!email) return filesStatus("Type your email above first, then click Forgot password.", "err");
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin });
+  filesStatus(error ? error.message : "If that email has an account, a reset link is on its way.", error ? "err" : "ok");
+};
+
+$("resetForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const { error } = await sb.auth.updateUser({ password: $("newPassword").value });
+  if (error) return filesStatus(error.message, "err");
+  $("resetForm").hidden = true; $("signinForm").hidden = false;
+  filesStatus("Password updated. You're signed in.", "ok");
+  renderAccount(); refreshFiles(); loadMe();
 };
 
 async function refreshFiles() {
