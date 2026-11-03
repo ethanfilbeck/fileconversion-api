@@ -48,8 +48,7 @@ Billing stays off (the routes return 503) until these are set in Cloudflare unde
 | `SUPABASE_SERVICE_ROLE_KEY` | Secret | Supabase → Project Settings → API keys → `service_role` |
 | `STRIPE_SECRET_KEY` | Secret | Stripe → Developers → API keys (`sk_test_...` while testing) |
 | `STRIPE_WEBHOOK_SECRET` | Secret | Stripe → Developers → Webhooks → your endpoint → Signing secret |
-| `STRIPE_PRICE_PRO` | Text | Stripe → Product catalog → Pro → price id (`price_...`) |
-| `STRIPE_PRICE_BUSINESS` | Text (optional) | same, for Business |
+| `STRIPE_PRICE_*` (4) | in `wrangler.toml` | monthly and yearly price ids for Pro and Business (test ids now; swap for live at launch) |
 
 Webhook endpoint: `https://fileconversion-api.ethanfilbeck.workers.dev/api/billing/webhook`. Send these events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`.
 

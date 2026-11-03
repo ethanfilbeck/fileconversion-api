@@ -48,6 +48,11 @@
   .row .go { margin-top: 0; }
   .go.secondary { background: none; border: 1px solid var(--line); color: var(--ink); }
   .muted { color: var(--muted); font-size: 14px; }
+  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
+  .plan { border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .plan h3 { margin: 0 0 4px; font-size: 16px; }
+  .plan ul { margin: 8px 0; padding-left: 18px; font-size: 14px; color: var(--muted); }
+  .plan .go { margin-top: 6px; padding: 9px; font-size: 14px; }
   footer { max-width: 760px; margin: 0 auto; padding: 16px; color: var(--muted); font-size: 13px; }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #111318; --card: #1a1d24; --ink: #eef0f3; --muted: #9aa2af; --line: #2c313b; --ok: #4cc37f; }
@@ -107,6 +112,10 @@
       </form>
     </div>
     <div id="signedIn" hidden>
+      <div id="upgrade" hidden>
+        <p class="muted">Upgrade for bigger files, more pages and more saved files. Cancel anytime.</p>
+        <div class="plans" id="planList"></div>
+      </div>
       <button class="go" id="uploadBtn">Upload a file</button>
       <input type="file" id="uploadInput" hidden />
       <ul class="files" id="myFiles"></ul>
@@ -288,11 +297,44 @@ function handleBillingReturn() {
   poll();
 }
 
+let planInfo = null;
+async function renderPlans() {
+  const box = $("upgrade");
+  box.hidden = !(session && me?.billingEnabled && me.plan === "free");
+  if (box.hidden) return;
+  try { planInfo = planInfo || await (await fetch("/api/plans")).json(); } catch { return; }
+  const list = $("planList");
+  list.textContent = "";
+  const money = (p) => (p.amount / 100).toLocaleString(undefined, { style: "currency", currency: p.currency.toUpperCase() });
+  for (const id of ["pro", "business"]) {
+    const l = planInfo.plans[id];
+    const prices = planInfo.prices.filter((p) => p.plan === id);
+    if (!l || !prices.length) continue;
+    const card = document.createElement("div"); card.className = "plan";
+    const h = document.createElement("h3"); h.textContent = l.name;
+    const ul = document.createElement("ul");
+    for (const t of [`${l.maxFileMB}MB per file, ${l.maxTotalMB}MB per job`, `Up to ${l.maxPages.toLocaleString()} pages`, `${l.maxSavedFiles.toLocaleString()} saved files`]) {
+      const li = document.createElement("li"); li.textContent = t; ul.append(li);
+    }
+    card.append(h, ul);
+    for (const interval of ["month", "year"]) {
+      const p = prices.find((x) => x.interval === interval);
+      if (!p) continue;
+      const b = document.createElement("button");
+      b.className = "go" + (interval === "year" ? " secondary" : "");
+      b.textContent = `${money(p)} / ${interval}`;
+      b.onclick = () => billing("/api/billing/checkout", { plan: id, interval });
+      card.append(b);
+    }
+    list.append(card);
+  }
+}
+
 async function billing(path, body) {
   try {
     const { url } = await (await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })).json();
     location.href = url;
-  } catch (err) { setStatus(err.message, "err"); }
+  } catch (err) { setStatus(err.message, "err"); filesStatus(err.message, "err"); }
 }
 
 function renderAccount() {
@@ -306,7 +348,7 @@ function renderAccount() {
       const b = document.createElement("button");
       b.className = "link";
       b.textContent = paid ? `${me.planName} · Manage billing` : "Upgrade to Pro";
-      b.onclick = () => paid ? billing("/api/billing/portal") : billing("/api/billing/checkout", { plan: "pro" });
+      b.onclick = () => paid ? billing("/api/billing/portal") : document.querySelector('[data-tool="files"]').click();
       el.append(b, document.createTextNode(" · "));
     }
     const out = document.createElement("button");
@@ -319,6 +361,7 @@ function renderAccount() {
     inBtn.onclick = () => document.querySelector('[data-tool="files"]').click();
     el.append(inBtn);
   }
+  renderPlans();
   $("signedOut").hidden = !!session;
   $("signedIn").hidden = !session;
 }

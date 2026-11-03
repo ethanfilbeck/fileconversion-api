@@ -70,30 +70,73 @@ export async function me(request, env) {
   });
 }
 
+// Stripe price ids come from env vars, one per plan and billing interval.
+const PRICE_VARS = {
+  pro: { month: "STRIPE_PRICE_PRO_MONTHLY", year: "STRIPE_PRICE_PRO_YEARLY" },
+  business: { month: "STRIPE_PRICE_BUSINESS_MONTHLY", year: "STRIPE_PRICE_BUSINESS_YEARLY" },
+};
+
+function configuredPrices(env) {
+  const out = [];
+  for (const [plan, byInterval] of Object.entries(PRICE_VARS)) {
+    for (const [interval, name] of Object.entries(byInterval)) {
+      if (env[name]) out.push({ plan, interval, id: env[name] });
+    }
+  }
+  return out;
+}
+
+// Amounts are read from Stripe so the page always shows the real price. Cached per isolate.
+let priceCache = { at: 0, key: "", data: null };
+async function priceAmounts(env) {
+  const prices = configuredPrices(env);
+  const key = prices.map((p) => p.id).join(",");
+  if (priceCache.data && priceCache.key === key && Date.now() - priceCache.at < 10 * 60 * 1000) return priceCache.data;
+  const data = await Promise.all(
+    prices.map(async (p) => {
+      const sp = await stripe(env, "GET", `prices/${encodeURIComponent(p.id)}`);
+      return { plan: p.plan, interval: p.interval, amount: sp.unit_amount, currency: sp.currency };
+    })
+  );
+  priceCache = { at: Date.now(), key, data };
+  return data;
+}
+
 // GET /api/plans — public price list for the UI
-export function plans(request, env) {
+export async function plans(request, env) {
+  const enabled = billingReady(env);
+  let prices = [];
+  if (enabled) {
+    try {
+      prices = await priceAmounts(env);
+    } catch {
+      prices = [];
+    }
+  }
   return Response.json({
-    billingEnabled: billingReady(env),
+    billingEnabled: enabled,
+    prices,
     plans: Object.fromEntries(Object.entries(PLANS).map(([id, l]) => [id, { name: l.name, ...publicLimits(l) }])),
   });
 }
 
-const billingReady = (env) => hasStripe(env) && hasAdmin(env) && Boolean(env.STRIPE_PRICE_PRO);
+const billingReady = (env) => hasStripe(env) && hasAdmin(env) && Boolean(env.STRIPE_PRICE_PRO_MONTHLY);
 
 function requireBilling(env) {
   if (!billingReady(env)) throw new HttpError(503, "Billing isn't set up yet");
 }
 
-function priceForPlan(env, plan) {
-  const price = { pro: env.STRIPE_PRICE_PRO, business: env.STRIPE_PRICE_BUSINESS }[plan];
+function priceForPlan(env, plan, interval) {
+  const name = PRICE_VARS[plan]?.[interval];
+  const price = name && env[name];
   if (!price) throw new HttpError(400, "Unknown plan");
   return price;
 }
 
+// Any configured price (monthly or yearly) maps back to its plan.
 function tierForPrice(env, priceId) {
-  if (priceId && priceId === env.STRIPE_PRICE_BUSINESS) return "business";
-  if (priceId && priceId === env.STRIPE_PRICE_PRO) return "pro";
-  return null;
+  if (!priceId) return null;
+  return configuredPrices(env).find((p) => p.id === priceId)?.plan || null;
 }
 
 async function ensureCustomer(env, user, profile) {
@@ -119,7 +162,8 @@ export async function checkout(request, env) {
   const { user, plan: currentPlan, profile } = await resolvePlan(request, env);
   const body = await request.json().catch(() => ({}));
   const wanted = body.plan || "pro";
-  const price = priceForPlan(env, wanted);
+  const interval = body.interval === "year" ? "year" : "month";
+  const price = priceForPlan(env, wanted, interval);
 
   if (currentPlan !== "free") {
     throw new HttpError(409, "You already have a paid plan. Use Manage billing to change it.");

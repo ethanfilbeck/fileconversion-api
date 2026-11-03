@@ -48,6 +48,8 @@ function fakeFetch(realFetch) {
       stripeCalls.push({ method, path: url.pathname, params, idem: init.headers["Idempotency-Key"] });
       if (url.pathname === "/v1/customers") return Response.json({ id: "cus_new" });
       if (url.pathname === "/v1/checkout/sessions") return Response.json({ url: "https://checkout.stripe.com/c/pay/cs_1" });
+      const pm = url.pathname.match(/^\/v1\/prices\/(.+)$/);
+      if (pm) return Response.json({ id: pm[1], unit_amount: { price_pro: 1200, price_pro_y: 9900, price_biz: 2900, price_biz_y: 24900 }[pm[1]], currency: "usd" });
       if (url.pathname === "/v1/billing_portal/sessions") return Response.json({ url: "https://billing.stripe.com/p/1" });
       const m = url.pathname.match(/^\/v1\/subscriptions\/(.+)$/);
       if (m) return subscriptions[m[1]] ? Response.json(subscriptions[m[1]]) : Response.json({ error: {} }, { status: 404 });
@@ -88,7 +90,7 @@ beforeAll(async () => {
   const jwk = { ...(await exportJWK(kp.publicKey)), kid: "k1", alg: "ES256" };
   env = {
     SUPABASE_URL, JWKS_JSON: JSON.stringify({ keys: [jwk] }), SUPABASE_SERVICE_ROLE_KEY: "service-key",
-    STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: WHSEC, STRIPE_PRICE_PRO: "price_pro", STRIPE_PRICE_BUSINESS: "price_biz",
+    STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: WHSEC, STRIPE_PRICE_PRO_MONTHLY: "price_pro", STRIPE_PRICE_PRO_YEARLY: "price_pro_y", STRIPE_PRICE_BUSINESS_MONTHLY: "price_biz", STRIPE_PRICE_BUSINESS_YEARLY: "price_biz_y",
   };
   realFetch = globalThis.fetch;
 });
@@ -159,6 +161,12 @@ describe("webhook sync", () => {
     expect(profiles[0].tier).toBe("business");
   });
 
+  it("maps yearly prices to their plan", async () => {
+    subscriptions.sub_1 = sub("sub_1", { items: { data: [{ price: { id: "price_pro_y" } }] } });
+    await call("POST", "/api/billing/webhook", await signedEvent({ type: "customer.subscription.created", data: { object: { id: "sub_1" } } }));
+    expect(profiles[0].tier).toBe("pro");
+  });
+
   it("does not grant a tier for an unknown price", async () => {
     subscriptions.sub_1 = sub("sub_1", { items: { data: [{ price: { id: "price_unknown" } }] } });
     await call("POST", "/api/billing/webhook", await signedEvent({ type: "customer.subscription.created", data: { object: { id: "sub_1" } } }));
@@ -184,6 +192,16 @@ describe("checkout & portal", () => {
       "line_items[0][price]": "price_pro", "subscription_data[metadata][user_id]": BOB,
       success_url: "https://site.test/?billing=success",
     });
+  });
+
+  it("uses the yearly price when asked", async () => {
+    await call("POST", "/api/billing/checkout", { auth: await token(BOB), json: { plan: "business", interval: "year" } });
+    expect(stripeCalls.at(-1).params["line_items[0][price]"]).toBe("price_biz_y");
+  });
+
+  it("/api/plans shows real amounts from Stripe", async () => {
+    const body = await (await call("GET", "/api/plans")).json();
+    expect(body.prices).toContainEqual({ plan: "pro", interval: "year", amount: 9900, currency: "usd" });
   });
 
   it("refuses checkout for users who already pay", async () => {

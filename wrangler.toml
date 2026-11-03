@@ -13,6 +13,14 @@ ALLOWED_ORIGINS = ""
 # Supabase project used for sign-in. Both values are public (safe in the browser).
 SUPABASE_URL = "https://nihvdpzghevumcgpvkxi.supabase.co"
 SUPABASE_PUBLISHABLE_KEY = "sb_publishable_EYNdl4jUpzyO-4m6pufPCg_xkA7tAYQ"
+# Stripe price ids (public). These are TEST-mode prices; swap for the live ones
+# (Stripe → Product catalog, live mode) together with a live secret key when launching.
+STRIPE_PRICE_PRO_MONTHLY = "price_1UXasnBu99obsSyFDHbQCnvs"       # $12 / month
+STRIPE_PRICE_PRO_YEARLY = "price_1UXasxBu99obsSyFEGEZjvn4"        # $99 / year
+STRIPE_PRICE_BUSINESS_MONTHLY = "price_1UXatZBu99obsSyFdVZ3z7DH"  # $29 / month
+STRIPE_PRICE_BUSINESS_YEARLY = "price_1UXatlBu99obsSyFizBFOn9b"   # $249 / year
+# Secrets (set in Cloudflare → Worker → Settings → Variables and Secrets, never here):
+#   SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
 
 [[r2_buckets]]
 binding = "BUCKET"
