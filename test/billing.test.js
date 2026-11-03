@@ -24,7 +24,9 @@ function fakeFetch(realFetch) {
     const method = (init.method || "GET").toUpperCase();
 
     if (url.origin === SUPABASE_URL) {
-      expect(init.headers.Authorization).toBe("Bearer service-key");
+      const k = env.SUPABASE_SERVICE_ROLE_KEY;
+      expect(init.headers.apikey).toBe(k);
+      expect(init.headers.Authorization).toBe(k.startsWith("sb_") ? undefined : `Bearer ${k}`);
       if (url.pathname === "/rest/v1/profiles") {
         const [[col, cond]] = [...url.searchParams].filter(([k]) => k !== "select");
         const val = decodeURIComponent(cond.replace(/^eq\./, ""));
@@ -273,6 +275,16 @@ describe("plans & limits", () => {
     const body = await (await call("GET", "/api/me", { auth: await token(ALICE) })).json();
     expect(body).toMatchObject({ plan: "pro", planName: "Pro", limits: { maxFileMB: 25 }, billingEnabled: true });
   });
+});
+
+it("works with new-style sb_secret_ service keys", async () => {
+  const saved = env.SUPABASE_SERVICE_ROLE_KEY;
+  env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_abc";
+  try {
+    Object.assign(profiles[0], { tier: "pro", subscription_status: "active" });
+    const body = await (await call("GET", "/api/me", { auth: await token(ALICE) })).json();
+    expect(body.plan).toBe("pro");
+  } finally { env.SUPABASE_SERVICE_ROLE_KEY = saved; }
 });
 
 it("formEncode builds Stripe's bracket syntax", () => {

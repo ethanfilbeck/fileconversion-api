@@ -3,12 +3,12 @@
 import { HttpError } from "./http.js";
 
 function headers(env, extra = {}) {
-  return {
-    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-    "Content-Type": "application/json",
-    ...extra,
-  };
+  const key = env.SUPABASE_SERVICE_ROLE_KEY;
+  const h = { apikey: key, "Content-Type": "application/json", ...extra };
+  // Legacy service_role keys are JWTs and go in Authorization too. New "sb_secret_" keys
+  // are not JWTs: send them only as apikey and Supabase applies service-role access.
+  if (!key.startsWith("sb_")) h.Authorization = `Bearer ${key}`;
+  return h;
 }
 
 export const hasAdmin = (env) => Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY);
