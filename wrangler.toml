@@ -12,7 +12,7 @@ directory = "./public"
 ALLOWED_ORIGINS = ""
 # Supabase project used for sign-in. Both values are public (safe in the browser).
 SUPABASE_URL = "https://nihvdpzghevumcgpvkxi.supabase.co"
-SUPABASE_PUBLISHABLE_KEY = ""
+SUPABASE_PUBLISHABLE_KEY = "sb_publishable_EYNdl4jUpzyO-4m6pufPCg_xkA7tAYQ"
 
 [[r2_buckets]]
 binding = "BUCKET"
