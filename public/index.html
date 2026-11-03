@@ -1,96 +1,203 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>FileConversion Upload</title>
-  <style>
-    body {
-      font-family: Arial;
-      max-width: 600px;
-      margin: 50px auto;
-    }
-
-    .dropzone {
-      border: 2px dashed #aaa;
-      padding: 40px;
-      text-align: center;
-      margin-bottom: 20px;
-      cursor: pointer;
-    }
-
-    .progress {
-      width: 100%;
-      background: #eee;
-      margin-top: 10px;
-    }
-
-    .bar {
-      width: 0%;
-      height: 20px;
-      background: green;
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PDFToolsHub: Merge, Split &amp; Compress PDFs</title>
+<meta name="description" content="Free online PDF tools: merge PDFs, split pages, and compress files. No signup." />
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --ink: #14171f; --muted: #5d6573;
+    --line: #dde1e7; --accent: #d93a2b; --accent-ink: #fff; --ok: #1d7a46;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  header { max-width: 760px; margin: 0 auto; padding: 32px 16px 8px; }
+  header h1 { margin: 0; font-size: 28px; letter-spacing: -0.02em; }
+  header h1 span { color: var(--accent); }
+  header p { margin: 4px 0 0; color: var(--muted); }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tabs button { border: 0; background: none; padding: 10px 16px; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; }
+  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 32px 16px; text-align: center; color: var(--muted); cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop.over, .drop:hover { border-color: var(--accent); background: #fff6f5; }
+  .drop strong { color: var(--ink); }
+  ul.files { list-style: none; padding: 0; margin: 16px 0 0; }
+  ul.files li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; font-size: 14px; }
+  ul.files li .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ul.files li .size { color: var(--muted); }
+  ul.files button { border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; font: inherit; }
+  .opts { margin-top: 16px; display: grid; gap: 10px; }
+  .opts label { font-size: 14px; color: var(--muted); }
+  .opts input[type=text] { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+  .go { margin-top: 18px; width: 100%; padding: 12px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 700; cursor: pointer; }
+  .go:disabled { opacity: .5; cursor: not-allowed; }
+  .status { margin-top: 14px; min-height: 24px; font-size: 14px; }
+  .status.err { color: var(--accent); }
+  .status.ok { color: var(--ok); }
+  .status a { color: inherit; font-weight: 700; }
+  footer { max-width: 760px; margin: 0 auto; padding: 16px; color: var(--muted); font-size: 13px; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111318; --card: #1a1d24; --ink: #eef0f3; --muted: #9aa2af; --line: #2c313b; --ok: #4cc37f; }
+    .drop.over, .drop:hover { background: #24191a; }
+    ul.files button { background: var(--card); color: var(--ink); }
+    .opts input[type=text] { background: var(--card); color: var(--ink); }
+  }
+</style>
 </head>
-
 <body>
+<header>
+  <h1>PDF<span>Tools</span>Hub</h1>
+  <p>Merge, split and compress PDFs. Files are processed and returned right away, never stored.</p>
+</header>
 
-<h2>Upload File</h2>
+<main>
+  <div class="tabs" role="tablist">
+    <button role="tab" data-tool="merge" aria-selected="true">Merge</button>
+    <button role="tab" data-tool="split" aria-selected="false">Split</button>
+    <button role="tab" data-tool="compress" aria-selected="false">Compress</button>
+  </div>
 
-<div class="dropzone" id="dropzone">
-  Drop file here or click
-  <input type="file" id="fileInput" hidden />
-</div>
+  <section class="card">
+    <div class="drop" id="drop" tabindex="0">
+      <strong id="dropTitle">Drop PDFs here</strong><br />or click to choose files
+      <input type="file" id="input" accept="application/pdf,.pdf" hidden />
+    </div>
+    <ul class="files" id="list"></ul>
 
-<button onclick="upload()">Upload</button>
+    <div class="opts" id="splitOpts" hidden>
+      <label><input type="radio" name="mode" value="range" checked /> Extract pages</label>
+      <input type="text" id="pages" placeholder="e.g. 1-3, 5, 8-" />
+      <label><input type="radio" name="mode" value="each" /> Split every page into its own PDF (ZIP)</label>
+    </div>
 
-<div class="progress">
-  <div class="bar" id="bar"></div>
-</div>
+    <button class="go" id="go" disabled>Merge PDFs</button>
+    <div class="status" id="status" role="status"></div>
+  </section>
+</main>
 
-<pre id="output"></pre>
+<footer>Limits: 10MB per file, 25MB per job, 500 pages.</footer>
 
 <script>
-const input = document.getElementById("fileInput");
-const dropzone = document.getElementById("dropzone");
-
-dropzone.onclick = () => input.click();
-
-dropzone.ondragover = e => {
-  e.preventDefault();
+const MAX_FILE = 10 * 1024 * 1024;
+const TOOLS = {
+  merge:    { label: "Merge PDFs",    multi: true,  min: 2, title: "Drop 2 or more PDFs here" },
+  split:    { label: "Split PDF",     multi: false, min: 1, title: "Drop a PDF here" },
+  compress: { label: "Compress PDF",  multi: false, min: 1, title: "Drop a PDF here" },
 };
+let tool = "merge";
+let files = [];
 
-dropzone.ondrop = e => {
-  e.preventDefault();
-  input.files = e.dataTransfer.files;
-};
+const $ = (id) => document.getElementById(id);
+const input = $("input"), drop = $("drop"), list = $("list"), go = $("go"), status = $("status");
 
-async function upload() {
-  const file = input.files[0];
-  const formData = new FormData();
-  formData.append("file", file);
+function fmt(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.ceil(n / 1024) + " KB"; }
 
-  const xhr = new XMLHttpRequest();
-  xhr.open("POST", "/upload");
-
-  xhr.upload.onprogress = e => {
-    const percent = (e.loaded / e.total) * 100;
-    document.getElementById("bar").style.width = percent + "%";
-  };
-
-  xhr.onload = () => {
-    const res = JSON.parse(xhr.responseText);
-
-    const link = `${window.location.origin}/file/${res.fileKey}`;
-
-    document.getElementById("output").innerHTML =
-      "Download Link:\n" + link +
-      "\n\nClick to copy";
-
-    navigator.clipboard.writeText(link);
-  };
-
-  xhr.send(formData);
+// Plain text by default so filenames in error messages can't inject HTML.
+function setStatus(text, kind = "", asHtml = false) {
+  status.className = "status " + kind;
+  if (asHtml) status.innerHTML = text; else status.textContent = text;
 }
-</script>
 
+function render() {
+  const t = TOOLS[tool];
+  list.innerHTML = "";
+  files.forEach((f, i) => {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "name"; name.textContent = f.name;
+    const size = document.createElement("span");
+    size.className = "size"; size.textContent = fmt(f.size);
+    li.append(name, size);
+    if (t.multi) {
+      li.append(btn("↑", () => move(i, -1), i === 0), btn("↓", () => move(i, 1), i === files.length - 1));
+    }
+    li.append(btn("✕", () => { files.splice(i, 1); render(); }));
+    list.append(li);
+  });
+  go.disabled = files.length < t.min;
+  go.textContent = t.label;
+  $("dropTitle").textContent = t.title;
+  $("splitOpts").hidden = tool !== "split";
+  input.multiple = t.multi;
+}
+
+function btn(text, onClick, disabled = false) {
+  const b = document.createElement("button");
+  b.textContent = text; b.disabled = disabled; b.onclick = onClick;
+  return b;
+}
+
+function move(i, d) { [files[i], files[i + d]] = [files[i + d], files[i]]; render(); }
+
+function add(fileList) {
+  setStatus("");
+  for (const f of fileList) {
+    if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") { setStatus(`"${f.name}" isn't a PDF.`, "err"); continue; }
+    if (f.size > MAX_FILE) { setStatus(`"${f.name}" is over 10MB.`, "err"); continue; }
+    if (TOOLS[tool].multi) files.push(f); else files = [f];
+  }
+  render();
+}
+
+document.querySelectorAll(".tabs button").forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll(".tabs button").forEach((x) => x.setAttribute("aria-selected", x === b));
+    tool = b.dataset.tool;
+    if (!TOOLS[tool].multi) files = files.slice(0, 1);
+    setStatus(""); render();
+  };
+});
+
+drop.onclick = () => input.click();
+drop.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } };
+input.onchange = () => { add(input.files); input.value = ""; };
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); add(e.dataTransfer.files); };
+
+go.onclick = async () => {
+  const fd = new FormData();
+  files.forEach((f) => fd.append("file", f));
+  if (tool === "split") {
+    const mode = document.querySelector('input[name=mode]:checked').value;
+    fd.append("mode", mode);
+    fd.append("pages", $("pages").value);
+  }
+  go.disabled = true;
+  setStatus("Processing…");
+  try {
+    const res = await fetch(`/api/${tool}`, { method: "POST", body: fd });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Request failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const name = (cd.match(/filename="([^"]+)"/) || [])[1] || "result.pdf";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+
+    let msg = `Done. <a href="${url}" download="${name}">Download ${name}</a>`;
+    if (tool === "compress") {
+      const before = +res.headers.get("X-Original-Size"), after = +res.headers.get("X-Compressed-Size");
+      msg += after < before
+        ? ` (${fmt(before)} → ${fmt(after)}, ${Math.round((1 - after / before) * 100)}% smaller)`
+        : " (this file was already optimized, so it's unchanged)";
+    }
+    setStatus(msg, "ok", true); // name is sanitized server-side to [A-Za-z0-9._-]
+  } catch (err) {
+    setStatus(err.message, "err");
+  } finally {
+    go.disabled = files.length < TOOLS[tool].min;
+  }
+};
+
+render();
+</script>
 </body>
 </html>
