@@ -10,6 +10,9 @@ directory = "./public"
 # Comma-separated origins allowed to call the API from other sites (e.g. your Pages SEO site).
 # The UI in public/ is same-origin and needs nothing here.
 ALLOWED_ORIGINS = ""
+# Supabase project used for sign-in. Both values are public (safe in the browser).
+SUPABASE_URL = "https://nihvdpzghevumcgpvkxi.supabase.co"
+SUPABASE_PUBLISHABLE_KEY = ""
 
 [[r2_buckets]]
 binding = "BUCKET"

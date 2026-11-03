@@ -39,6 +39,15 @@
   .status.err { color: var(--accent); }
   .status.ok { color: var(--ok); }
   .status a { color: inherit; font-weight: 700; }
+  .bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .account { font-size: 14px; color: var(--muted); text-align: right; padding-top: 6px; }
+  .link { border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
+  .signin { display: grid; gap: 10px; margin-top: 4px; }
+  .signin input { padding: 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: var(--card); color: var(--ink); }
+  .row { display: flex; gap: 8px; }
+  .row .go { margin-top: 0; }
+  .go.secondary { background: none; border: 1px solid var(--line); color: var(--ink); }
+  .muted { color: var(--muted); font-size: 14px; }
   footer { max-width: 760px; margin: 0 auto; padding: 16px; color: var(--muted); font-size: 13px; }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #111318; --card: #1a1d24; --ink: #eef0f3; --muted: #9aa2af; --line: #2c313b; --ok: #4cc37f; }
@@ -50,8 +59,13 @@
 </head>
 <body>
 <header>
-  <h1>PDF<span>Tools</span>Hub</h1>
-  <p>Merge, split and compress PDFs. Files are processed and returned right away, never stored.</p>
+  <div class="bar">
+    <div>
+      <h1>PDF<span>Tools</span>Hub</h1>
+      <p>Merge, split and compress PDFs. Tool files are processed and returned right away, never stored.</p>
+    </div>
+    <div class="account" id="account"></div>
+  </div>
 </header>
 
 <main>
@@ -59,9 +73,10 @@
     <button role="tab" data-tool="merge" aria-selected="true">Merge</button>
     <button role="tab" data-tool="split" aria-selected="false">Split</button>
     <button role="tab" data-tool="compress" aria-selected="false">Compress</button>
+    <button role="tab" data-tool="files" aria-selected="false">My files</button>
   </div>
 
-  <section class="card">
+  <section class="card" id="toolCard">
     <div class="drop" id="drop" tabindex="0">
       <strong id="dropTitle">Drop PDFs here</strong><br />or click to choose files
       <input type="file" id="input" accept="application/pdf,.pdf" hidden />
@@ -76,11 +91,33 @@
 
     <button class="go" id="go" disabled>Merge PDFs</button>
     <div class="status" id="status" role="status"></div>
+    <button class="go secondary" id="save" hidden>Save result to My files</button>
+  </section>
+
+  <section class="card" id="filesCard" hidden>
+    <div id="signedOut">
+      <p class="muted">Sign in to keep files in your account. Only you can see them.</p>
+      <form class="signin" id="signinForm">
+        <input type="email" id="email" placeholder="Email" autocomplete="email" required />
+        <input type="password" id="password" placeholder="Password (8+ characters)" autocomplete="current-password" minlength="8" required />
+        <div class="row">
+          <button class="go" type="submit" data-action="in">Sign in</button>
+          <button class="go secondary" type="submit" data-action="up">Create account</button>
+        </div>
+      </form>
+    </div>
+    <div id="signedIn" hidden>
+      <button class="go" id="uploadBtn">Upload a file</button>
+      <input type="file" id="uploadInput" hidden />
+      <ul class="files" id="myFiles"></ul>
+    </div>
+    <div class="status" id="filesStatus" role="status"></div>
   </section>
 </main>
 
 <footer>Limits: 10MB per file, 25MB per job, 500 pages.</footer>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
 const MAX_FILE = 10 * 1024 * 1024;
 const TOOLS = {
@@ -146,9 +183,13 @@ function add(fileList) {
 document.querySelectorAll(".tabs button").forEach((b) => {
   b.onclick = () => {
     document.querySelectorAll(".tabs button").forEach((x) => x.setAttribute("aria-selected", x === b));
+    const isFiles = b.dataset.tool === "files";
+    $("toolCard").hidden = isFiles;
+    $("filesCard").hidden = !isFiles;
+    if (isFiles) { refreshFiles(); return; }
     tool = b.dataset.tool;
     if (!TOOLS[tool].multi) files = files.slice(0, 1);
-    setStatus(""); render();
+    setStatus(""); $("save").hidden = true; render();
   };
 });
 
@@ -169,6 +210,7 @@ go.onclick = async () => {
   }
   go.disabled = true;
   setStatus("Processing…");
+  $("save").hidden = true;
   try {
     const res = await fetch(`/api/${tool}`, { method: "POST", body: fd });
     if (!res.ok) {
@@ -176,8 +218,11 @@ go.onclick = async () => {
       throw new Error(body.error || `Request failed (${res.status})`);
     }
     const blob = await res.blob();
+    lastResult = { blob, name: "" };
     const cd = res.headers.get("Content-Disposition") || "";
     const name = (cd.match(/filename="([^"]+)"/) || [])[1] || "result.pdf";
+    lastResult.name = name;
+    $("save").hidden = !session;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = name; a.click();
@@ -197,7 +242,121 @@ go.onclick = async () => {
   }
 };
 
+// ---------- Accounts (Supabase) & My files ----------
+let sb = null, session = null, lastResult = null;
+
+async function initAuth() {
+  try {
+    const cfg = await (await fetch("/api/config")).json();
+    if (!cfg.supabaseUrl || !cfg.supabaseKey || !window.supabase) return renderAccount();
+    sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
+    session = (await sb.auth.getSession()).data.session;
+    sb.auth.onAuthStateChange((_e, s) => { session = s; renderAccount(); refreshFiles(); });
+  } catch { /* accounts unavailable; tools still work */ }
+  renderAccount();
+}
+
+function renderAccount() {
+  const el = $("account");
+  el.textContent = "";
+  if (!sb) return;
+  if (session) {
+    el.append(document.createTextNode(session.user.email + " · "));
+    const out = document.createElement("button");
+    out.className = "link"; out.textContent = "Sign out";
+    out.onclick = () => sb.auth.signOut();
+    el.append(out);
+  } else {
+    const inBtn = document.createElement("button");
+    inBtn.className = "link"; inBtn.textContent = "Sign in";
+    inBtn.onclick = () => document.querySelector('[data-tool="files"]').click();
+    el.append(inBtn);
+  }
+  $("signedOut").hidden = !!session;
+  $("signedIn").hidden = !session;
+}
+
+function filesStatus(text, kind = "") { const s = $("filesStatus"); s.className = "status " + kind; s.textContent = text; }
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), Authorization: `Bearer ${session.access_token}` } });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Request failed (${res.status})`);
+  }
+  return res;
+}
+
+let submitAction = "in";
+document.querySelectorAll("#signinForm [data-action]").forEach((b) => b.onclick = () => submitAction = b.dataset.action);
+$("signinForm").onsubmit = async (e) => {
+  e.preventDefault();
+  if (!sb) return filesStatus("Accounts aren't set up yet.", "err");
+  const email = $("email").value.trim(), password = $("password").value;
+  filesStatus(submitAction === "up" ? "Creating account…" : "Signing in…");
+  const { data, error } = submitAction === "up"
+    ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin } })
+    : await sb.auth.signInWithPassword({ email, password });
+  if (error) return filesStatus(error.message, "err");
+  if (submitAction === "up" && !data.session) return filesStatus("Check your email to confirm your account, then sign in.", "ok");
+  filesStatus("");
+};
+
+async function refreshFiles() {
+  const ul = $("myFiles");
+  if (!session || $("filesCard").hidden) return;
+  try {
+    const { files: mine } = await (await api("/api/files")).json();
+    ul.textContent = "";
+    if (!mine.length) { const li = document.createElement("li"); li.textContent = "No files yet."; ul.append(li); return; }
+    for (const f of mine) {
+      const li = document.createElement("li");
+      const name = document.createElement("span"); name.className = "name"; name.textContent = f.name;
+      const size = document.createElement("span"); size.className = "size"; size.textContent = fmt(f.size);
+      li.append(name, size, btn("Download", () => download(f)), btn("Delete", () => remove(f)));
+      ul.append(li);
+    }
+  } catch (err) { filesStatus(err.message, "err"); }
+}
+
+async function download(f) {
+  try {
+    const blob = await (await api(`/api/files/${f.id}`)).blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = f.name; a.click();
+  } catch (err) { filesStatus(err.message, "err"); }
+}
+
+async function remove(f) {
+  try { await api(`/api/files/${f.id}`, { method: "DELETE" }); refreshFiles(); }
+  catch (err) { filesStatus(err.message, "err"); }
+}
+
+async function saveFile(file) {
+  const fd = new FormData(); fd.append("file", file);
+  await api("/api/files", { method: "POST", body: fd });
+}
+
+$("uploadBtn").onclick = () => $("uploadInput").click();
+$("uploadInput").onchange = async () => {
+  const f = $("uploadInput").files[0]; $("uploadInput").value = "";
+  if (!f) return;
+  if (f.size > MAX_FILE) return filesStatus("Files must be under 10MB.", "err");
+  filesStatus("Uploading…");
+  try { await saveFile(f); filesStatus("Saved.", "ok"); refreshFiles(); }
+  catch (err) { filesStatus(err.message, "err"); }
+};
+
+$("save").onclick = async () => {
+  if (!lastResult || !session) return;
+  $("save").disabled = true;
+  try { await saveFile(new File([lastResult.blob], lastResult.name)); setStatus("Saved to My files.", "ok"); $("save").hidden = true; }
+  catch (err) { setStatus(err.message, "err"); }
+  finally { $("save").disabled = false; }
+};
+
 render();
+initAuth();
 </script>
 </body>
 </html>

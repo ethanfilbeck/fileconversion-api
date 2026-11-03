@@ -3,6 +3,8 @@
 import { HttpError, finalize, jsonError, corsHeaders, safeFilename } from "./lib/http.js";
 import { LIMITS } from "./lib/pdf.js";
 import { merge, split, compress } from "./tools.js";
+import { uploadFile, listFiles, downloadFile, deleteFile } from "./files.js";
+import { requireUser } from "./lib/auth.js";
 
 const ROUTES = {
   "POST /api/merge": merge,
@@ -10,7 +12,16 @@ const ROUTES = {
   "POST /api/compress": compress,
   "GET /health": () => Response.json({ status: "ok" }),
   "POST /upload": (req, env) => upload(req, env),
+  // Public, non-secret settings the browser needs to start Supabase auth.
+  "GET /api/config": (req, env) =>
+    Response.json({ supabaseUrl: env.SUPABASE_URL || null, supabaseKey: env.SUPABASE_PUBLISHABLE_KEY || null }),
+  "GET /api/me": async (req, env) => Response.json({ user: await requireUser(req, env) }),
+  "GET /api/files": listFiles,
+  "POST /api/files": uploadFile,
 };
+
+// Routes with an id in the path: /api/files/:id
+const FILE_ROUTES = { GET: downloadFile, DELETE: deleteFile };
 
 export default {
   async fetch(request, env) {
@@ -27,6 +38,8 @@ export default {
       const handler = ROUTES[`${request.method} ${path}`];
       if (handler) {
         response = await handler(request, env);
+      } else if (path.startsWith("/api/files/") && FILE_ROUTES[request.method]) {
+        response = await FILE_ROUTES[request.method](request, env, path.slice("/api/files/".length));
       } else if (request.method === "GET" && path.startsWith("/file/")) {
         response = await download(path.slice("/file/".length), env);
       } else {
